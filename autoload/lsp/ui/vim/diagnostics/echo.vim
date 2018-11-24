@@ -1,3 +1,5 @@
+let s:cursor_moved_timer = -1
+
 function! lsp#ui#vim#diagnostics#echo#cursor_moved() abort
     if !g:lsp_diagnostics_echo_cursor
         return
@@ -8,15 +10,8 @@ function! lsp#ui#vim#diagnostics#echo#cursor_moved() abort
         return
     endif
 
-    call s:stop_cursor_moved_timer()
-
-    let l:current_pos = getcurpos()[0:2]
-
-    " use timer to avoid recalculation
-    if !exists('s:last_pos') || l:current_pos != s:last_pos
-        let s:last_pos = l:current_pos
-        let s:cursor_moved_timer = timer_start(g:lsp_diagnostics_echo_delay, function('s:echo_diagnostics_under_cursor'))
-    endif
+    call timer_stop(s:cursor_moved_timer)
+    let s:cursor_moved_timer = timer_start(g:lsp_diagnostics_echo_delay, function('s:echo_diagnostics_under_cursor'))
 endfunction
 
 function! s:echo_diagnostics_under_cursor(...) abort
