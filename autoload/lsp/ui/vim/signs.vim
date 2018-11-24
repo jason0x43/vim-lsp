@@ -177,8 +177,9 @@ function! s:clear_signs(server_name, path) abort
         return
     endif
 
-    for l:id in s:signs[a:server_name][a:path]
-        execute ':sign unplace ' . l:id . ' file=' . a:path
+    for l:data in s:signs[a:server_name][a:path]
+        execute ":sign unplace " . l:data['id'] . " file=" . a:path
+        call matchdelete(l:data['highlight'])
     endfor
 
     let s:signs[a:server_name][a:path] = []
@@ -194,8 +195,13 @@ function! s:place_signs(server_name, path, diagnostics) abort
             let l:name = 'LspError'
             if has_key(l:item, 'severity') && !empty(l:item['severity'])
                 let l:name = get(s:severity_sign_names_mapping, l:item['severity'], 'LspError')
-                execute ':sign place ' . g:lsp_next_sign_id . ' name=' . l:name . ' line=' . l:line . ' file=' . a:path
-                call add(s:signs[a:server_name][a:path], g:lsp_next_sign_id)
+                execute ":sign place " . g:lsp_next_sign_id . " name=" . l:name . " line=" . l:line . " file=" . a:path
+
+		let l:col = l:item['range']['start']['character'] + 1
+		let l:len = (l:item['range']['end']['character'] + 1) - l:col
+		let l:highlight = matchaddpos(l:name . 'Text', [[l:line, l:col, l:len]])
+
+                call add(s:signs[a:server_name][a:path], {'id': g:lsp_next_sign_id, 'highlight': l:highlight})
                 call lsp#log('add signs')
                 let g:lsp_next_sign_id += 1
 
