@@ -20,11 +20,11 @@ if !hlexists('LspWarningText')
 endif
 
 if !hlexists('LspInformationText')
-    highlight link LspInformationText Normal
+    hi LspInformationText cterm=underline
 endif
 
 if !hlexists('LspHintText')
-    highlight link LspHintText Normal
+    hi LspHintText cterm=underline
 endif
 
 function! lsp#ui#vim#signs#enable() abort
@@ -111,7 +111,7 @@ function! s:add_sign(sign_name, sign_default_text, sign_options) abort
     if !empty(l:sign_icon)
         let l:sign_string .= ' icon=' . l:sign_icon
     endif
-    let l:sign_string .= ' texthl=' . a:sign_name . 'Text'
+    let l:sign_string .= ' texthl=' . a:sign_name . 'Sign'
     let l:sign_string .= ' linehl=' . a:sign_name . 'Line'
     exec l:sign_string
 endfunction
