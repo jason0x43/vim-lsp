@@ -3,6 +3,7 @@
 let s:enabled = 0
 let s:signs_defined = 0
 let s:signs = {} " { server_name: { path: {} } }
+let s:hlsources = {} " { server_name: { path: -1 } }
 let s:err_loc = [] " {errlinelist}
 let s:severity_sign_names_mapping = {
     \ 1: 'LspError',
@@ -161,10 +162,12 @@ function! lsp#ui#vim#signs#set(server_name, data) abort
     let l:path = lsp#utils#uri_to_path(l:uri)
     if !has_key(s:signs, a:server_name)
         let s:signs[a:server_name] = {}
+        let s:hlsources[a:server_name] = {}
     endif
 
     if !has_key(s:signs[a:server_name], l:path)
         let s:signs[a:server_name][l:path] = []
+        let s:hlsources[a:server_name][l:path] = 0
     endif
 
     call s:clear_signs(a:server_name, l:path)
@@ -177,10 +180,14 @@ function! s:clear_signs(server_name, path) abort
         return
     endif
 
-    for l:data in s:signs[a:server_name][a:path]
-        execute ":sign unplace " . l:data['id'] . " file=" . a:path
-        call matchdelete(l:data['highlight'])
+    for l:id in s:signs[a:server_name][a:path]
+        execute ":sign unplace " . l:id . " file=" . a:path
     endfor
+
+    let l:source = s:hlsources[a:server_name][a:path]
+    if l:source != 0
+	call nvim_buf_clear_highlight(bufnr('%'), l:source, 0, -1)
+    endif
 
     let s:signs[a:server_name][a:path] = []
 endfunction
@@ -196,12 +203,7 @@ function! s:place_signs(server_name, path, diagnostics) abort
             if has_key(l:item, 'severity') && !empty(l:item['severity'])
                 let l:name = get(s:severity_sign_names_mapping, l:item['severity'], 'LspError')
                 execute ":sign place " . g:lsp_next_sign_id . " name=" . l:name . " line=" . l:line . " file=" . a:path
-
-		let l:col = l:item['range']['start']['character'] + 1
-		let l:len = (l:item['range']['end']['character'] + 1) - l:col
-		let l:highlight = matchaddpos(l:name . 'Text', [[l:line, l:col, l:len]])
-
-                call add(s:signs[a:server_name][a:path], {'id': g:lsp_next_sign_id, 'highlight': l:highlight})
+                call add(s:signs[a:server_name][a:path], g:lsp_next_sign_id)
                 call lsp#log('add signs')
                 let g:lsp_next_sign_id += 1
 
@@ -209,6 +211,14 @@ function! s:place_signs(server_name, path, diagnostics) abort
                     call add(s:err_loc, l:line)
                 endif
                 let s:err_loc = sort(s:err_loc)
+
+		let l:start = l:item['range']['start']['character']
+		let l:end = l:item['range']['end']['character']
+		let l:hlsource = s:hlsources[a:server_name][a:path]
+		let l:source = nvim_buf_add_highlight(bufnr('%'), l:hlsource, l:name . 'Text', l:line - 1, l:start, l:end)
+		if l:hlsource == 0
+		    let s:hlsources[a:server_name][a:path] = l:source
+		endif
             endif
         endfor
     endif
