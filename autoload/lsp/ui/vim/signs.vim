@@ -167,7 +167,7 @@ function! lsp#ui#vim#signs#set(server_name, data) abort
 
     if !has_key(s:signs[a:server_name], l:path)
         let s:signs[a:server_name][l:path] = []
-        let s:hlsources[a:server_name][l:path] = 0
+        let s:hlsources[a:server_name][l:path] = nvim_create_namespace('')
     endif
 
     call s:clear_signs(a:server_name, l:path)
@@ -186,7 +186,7 @@ function! s:clear_signs(server_name, path) abort
 
     let l:source = s:hlsources[a:server_name][a:path]
     if l:source != 0
-	call nvim_buf_clear_highlight(bufnr('%'), l:source, 0, -1)
+        call nvim_buf_clear_namespace(bufnr('%'), l:source, 0, -1)
     endif
 
     let s:signs[a:server_name][a:path] = []
@@ -212,13 +212,10 @@ function! s:place_signs(server_name, path, diagnostics) abort
                 endif
                 let s:err_loc = sort(s:err_loc)
 
-		let l:start = l:item['range']['start']['character']
-		let l:end = l:item['range']['end']['character']
-		let l:hlsource = s:hlsources[a:server_name][a:path]
-		let l:source = nvim_buf_add_highlight(bufnr('%'), l:hlsource, l:name . 'Text', l:line - 1, l:start, l:end)
-		if l:hlsource == 0
-		    let s:hlsources[a:server_name][a:path] = l:source
-		endif
+                let l:start = l:item['range']['start']['character']
+                let l:end = l:item['range']['end']['character']
+                let l:hlsource = s:hlsources[a:server_name][a:path]
+                call nvim_buf_add_highlight(bufnr('%'), l:hlsource, l:name . 'Text', l:line - 1, l:start, l:end)
             endif
         endfor
     endif
