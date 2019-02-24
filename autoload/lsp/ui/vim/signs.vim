@@ -10,7 +10,7 @@ let s:hlsources = {} " { path: { server_name: [] } }
 let s:action_queue = []
 let s:action_queue_timer = 0
 let s:action_queue_delay = 10
-let s:action_queue_batch_size = 10
+let s:action_queue_batch_size = 100
 let s:severity_sign_names_mapping = {
     \ 1: 'LspError',
     \ 2: 'LspWarning',
