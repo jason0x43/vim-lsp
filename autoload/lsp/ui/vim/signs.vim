@@ -134,9 +134,9 @@ function! s:add_sign(sign_name, sign_default_text, sign_options) abort
         call sign_define(a:sign_name, l:options)
     else
         let l:sign_string = 'sign define ' . a:sign_name
-        let l:sign_string .= ' text=' . get(a:sign_options, 'text', a:sign_default_text)
-        let l:sign_string .= ' texthl=' . a:sign_name . 'Sign'
-        let l:sign_string .= ' linehl=' . a:sign_name . 'Line'
+            \ . ' text=' . get(a:sign_options, 'text', a:sign_default_text)
+            \ . ' texthl=' . a:sign_name . 'Sign'
+            \ . ' linehl=' . a:sign_name . 'Line'
         let l:sign_icon = get(a:sign_options, 'icon', '')
         if !empty(l:sign_icon)
             let l:sign_string .= ' icon=' . l:sign_icon
@@ -155,14 +155,18 @@ function! s:define_signs() abort
 endfunction
 
 function! s:get_signs(bufnr) abort
-    if !s:supports_signs | return | endif
+    if !s:supports_signs | return [] | endif
     if s:supports_signs_api
         let l:signs = sign_getplaced(a:bufnr, { 'group': '*' })
         return !empty(l:signs) ? l:signs[0]['signs'] : []
     else
         let l:path = expand('#' . a:bufnr . ':p')
-        let l:signs = s:signs[l:path][b:server_name]
-        return !empty(l:signs) ? l:signs : []
+        let l:signs = []
+        for l:server_signs = items(s:signs[l:path])
+        for l:entry in l:server_signs
+            call add(l:signs, l:entry[1])
+        endfor
+        return l:signs
     endif
 endfunction
 
@@ -237,7 +241,6 @@ function! s:clear_signs(server_name, path) abort
                 \ 'path': a:path
                 \ })
         endfor
-        let s:signs[a:path][a:server_name] = []
 
         if s:supports_nvim_highlight
             call s:queue_action({
@@ -246,6 +249,8 @@ function! s:clear_signs(server_name, path) abort
                 \ 'bufnr': bufnr('%'),
                 \ })
         endif
+
+        let s:signs[a:path][a:server_name] = []
     endif
 endfunction
 
@@ -298,11 +303,11 @@ endfunction
 function! s:queue_action(action)
     call add(s:action_queue, a:action)
     if s:action_queue_timer == 0
-        let s:action_queue_timer = timer_start(s:action_queue_delay, function('s:process_queue'))
+        let s:action_queue_timer = timer_start(s:action_queue_delay, function('s:process_actions'))
     endif
 endfunction
 
-function! s:process_queue(timer_id) abort
+function! s:process_actions(timer_id) abort
     let s:action_queue_timer = 0
 
     let l:i = 0
@@ -331,8 +336,8 @@ function! s:process_queue(timer_id) abort
 
         let l:i += 1
     endwhile
-    
+
     if len(s:action_queue) > 0
-        let s:action_queue_timer = timer_start(s:action_queue_delay, function('s:process_queue'))
+        let s:action_queue_timer = timer_start(s:action_queue_delay, function('s:process_actions'))
     endif
 endfunction
