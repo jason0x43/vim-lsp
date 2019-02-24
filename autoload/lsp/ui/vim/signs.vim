@@ -3,9 +3,14 @@
 " https://github.com/vim/vim/pull/3652
 let s:supports_signs = has('signs')
 let s:supports_signs_api = exists('*sign_define')
+let s:supports_nvim_highlight = exists('*nvim_buf_add_highlight')
 let s:enabled = 0
-let s:signs = {} " { server_name: { path: {} } }
-let s:hlsources = {} " { server_name: { path: -1 } }
+let s:signs = {} " { path: { server_name: [] } }
+let s:hlsources = {} " { path: { server_name: [] } }
+let s:action_queue = []
+let s:action_queue_timer = 0
+let s:action_queue_delay = 10
+let s:action_queue_batch_size = 10
 let s:severity_sign_names_mapping = {
     \ 1: 'LspError',
     \ 2: 'LspWarning',
@@ -155,7 +160,8 @@ function! s:get_signs(bufnr) abort
         let l:signs = sign_getplaced(a:bufnr, { 'group': '*' })
         return !empty(l:signs) ? l:signs[0]['signs'] : []
     else
-        let l:signs = s:signs[b:server_name][expand("#" . a:bufnr . ":p")]
+        let l:path = expand('#' . a:bufnr . ':p')
+        let l:signs = s:signs[l:path][b:server_name]
         return !empty(l:signs) ? l:signs : []
     endif
 endfunction
@@ -193,21 +199,23 @@ function! lsp#ui#vim#signs#set(server_name, data) abort
     if !s:supports_signs_api
         let b:server_name = a:server_name
 
-        if !has_key(s:signs, a:server_name)
-            let s:signs[a:server_name] = {}
+        if !has_key(s:signs, l:path)
+            let s:signs[l:path] = {}
         endif
 
-        if !has_key(s:signs[a:server_name], l:path)
-            let s:signs[a:server_name][l:path] = []
+        if !has_key(s:signs[l:path], a:server_name)
+            let s:signs[l:path][a:server_name] = []
         endif
     endif
 
-    if !has_key(s:hlsources, a:server_name)
-        let s:hlsources[a:server_name] = {}
-    endif
+    if s:supports_nvim_highlight
+        if !has_key(s:hlsources, l:path)
+            let s:hlsources[l:path] = {}
+        endif
 
-    if !has_key(s:hlsources[a:server_name], l:path)
-        let s:hlsources[a:server_name][l:path] = nvim_create_namespace('')
+        if !has_key(s:hlsources[l:path], a:server_name)
+            let s:hlsources[l:path][a:server_name] = nvim_create_namespace('')
+        endif
     endif
 
     " will always replace existing set
@@ -222,14 +230,21 @@ function! s:clear_signs(server_name, path) abort
         let l:sign_group = s:get_sign_group(a:server_name)
         call sign_unplace(l:sign_group, { 'buffer': a:path })
     else
-        if has_key(s:signs[a:server_name], a:path)
-            for l:id in s:signs[a:server_name][a:path]
-                execute ':sign unplace ' . l:id . ' file=' . a:path
-            endfor
-        endif
-        if has_key(s:hlsources[a:server_name], a:path)
-            let l:source = s:hlsources[a:server_name][a:path]
-            call nvim_buf_clear_namespace(bufnr('%'), l:source, 0, -1)
+        for l:sign in s:signs[a:path][a:server_name]
+            call s:queue_action({
+                \ 'type': 'remove',
+                \ 'sign_id': l:sign['id'],
+                \ 'path': a:path
+                \ })
+        endfor
+        let s:signs[a:path][a:server_name] = []
+
+        if s:supports_nvim_highlight
+            call s:queue_action({
+                \ 'type': 'remove_hl',
+                \ 'hlsource': s:hlsources[a:path][a:server_name],
+                \ 'bufnr': bufnr('%'),
+                \ })
         endif
     endif
 endfunction
@@ -250,33 +265,74 @@ function! s:place_signs(server_name, path, diagnostics) abort
             if has_key(l:item, 'severity') && !empty(l:item['severity'])
                 let l:sign_name = get(s:severity_sign_names_mapping, l:item['severity'], 'LspError')
                 " pass 0 and let vim generate sign id
-                let l:sign_id = s:sign_place(l:sign_group, l:sign_name, a:server_name, a:path, l:line)
+                let l:sign_id = s:sign_place(l:sign_group, l:sign_name, a:server_name, a:path, l:line, l:item)
                 call lsp#log('add signs', l:sign_id)
-
-                call s:add_highlight(l:sign_name, a:server_name, a:path, l:line, l:item)
             endif
         endfor
     endif
 endfunction
 
-function! s:sign_place(sign_group, sign_name, server_name, path, line)
+function! s:sign_place(sign_group, sign_name, server_name, path, line, item)
     let l:sign_id = 0
     if s:supports_signs_api
         " pass 0 and let vim generate sign id
         let l:sign_id = sign_place(0, a:sign_group, a:sign_name, a:path, { 'lnum': a:line })
     else
         let l:sign_id = g:lsp_next_sign_id
-        execute ':sign place ' . l:sign_id . ' name=' . a:sign_name . ' line=' . a:line . ' file=' . a:path
-        call add(s:signs[a:server_name][a:path], l:sign_id)
-        call lsp#log('add signs', l:sign_id)
         let g:lsp_next_sign_id += 1
+        call s:queue_action({
+            \ 'type': 'add',
+            \ 'sign_id': l:sign_id,
+            \ 'sign_name': a:sign_name,
+            \ 'server_name': a:server_name,
+            \ 'path': a:path,
+            \ 'line': a:line,
+            \ 'item': a:item,
+            \ })
+        call add(s:signs[a:path][a:server_name], { 'id': l:sign_id, 'lnum': a:line, 'name': a:sign_name })
+        call lsp#log('add signs', l:sign_id)
     endif
     return l:sign_id
 endfunction
 
-function! s:add_highlight(sign_name, server_name, path, line, item)
-    let l:start = a:item['range']['start']['character']
-    let l:end = a:item['range']['end']['character']
-    let l:hlsource = s:hlsources[a:server_name][a:path]
-    call nvim_buf_add_highlight(bufnr('%'), l:hlsource, a:sign_name . 'Text', a:line - 1, l:start, l:end)
+function! s:queue_action(action)
+    call add(s:action_queue, a:action)
+    if s:action_queue_timer == 0
+        let s:action_queue_timer = timer_start(s:action_queue_delay, function('s:process_queue'))
+    endif
+endfunction
+
+function! s:process_queue(timer_id) abort
+    let s:action_queue_timer = 0
+
+    let l:i = 0
+    while l:i < s:action_queue_batch_size && len(s:action_queue) > 0
+        let l:entry = remove(s:action_queue, 0)
+        let l:type = l:entry['type']
+
+        if l:type ==# 'add'
+            let l:sign_name = l:entry['sign_name']
+            let l:path = l:entry['path']
+            let l:line = l:entry['line']
+            execute ':sign place ' . l:entry['sign_id'] . ' name=' . l:sign_name . ' line=' . l:line . ' file=' . l:path
+
+            if s:supports_nvim_highlight
+                let l:item = l:entry['item']
+                let l:start = l:item['range']['start']['character']
+                let l:end = l:item['range']['end']['character']
+                let l:hlsource = s:hlsources[l:path][l:entry['server_name']]
+                call nvim_buf_add_highlight(bufnr('%'), l:hlsource, l:sign_name . 'Text', l:line - 1, l:start, l:end)
+            endif
+        elseif l:type ==# 'remove'
+            execute ':sign unplace ' . l:entry['sign_id'] . ' file=' . l:entry['path']
+        elseif l:type ==# 'remove_hl'
+            call nvim_buf_clear_namespace(l:entry['bufnr'], l:entry['hlsource'], 0, -1)
+        endif
+
+        let l:i += 1
+    endwhile
+    
+    if len(s:action_queue) > 0
+        let s:action_queue_timer = timer_start(s:action_queue_delay, function('s:process_queue'))
+    endif
 endfunction
